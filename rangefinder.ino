@@ -2,45 +2,67 @@
 #include <Bridge.h>
 #include <HttpClient.h>
 
-// this constant won't change.  It's the pin number
-// of the sensor's output:
+//
+// Constants
+//
 const int pingPin = 7;
-int loopTimeout; // Every 5 seconds
-const int settingsRefreshTimeout = 15000; // Every 15 seconds
-unsigned long lastSettingsRefresh = millis();
-unsigned long timeSinceLastRefresh;
-const float minDistance = 12.0;
-//int withinRangeTimeout = int(config[""]); # In seconds
-//rangeThreshold = int(sys.argv[3]) # In centimeters
-int notificationTimeout; // In seconds
-//distanceCheckInterval = int(sys.argv[5])
-//outOfRangeSince = None
-//withinRangeSince = None
-//lastNotifiedAt = time.time() - notificationTimeout
 HttpClient client;
 
+//
+// Settings
+//
+int loopTimeout; // In milliseconds
+int settingsRefreshTimeoutInSec; // In seconds
+int withinRangeTimeoutInSec; // In seconds
+int rangeThreshold; // In inches
+int notificationTimeout; // In seconds
+
+//
+// Variables
+//
+unsigned long lastSettingsRefresh = millis();
+unsigned long secondsSinceLastRefresh;
+float outOfRangeSince;
+float withinRangeSince;
+
+//
+// Setup
+//
 void setup() {
-  // initialize serial communication:
+  // Initialize serial communication
   Bridge.begin();
   Console.begin();
   
-  Console.println("You're connected to the Console!!!!");
-  
-  while (!Console){
-    ; // wait for Console port to connect.
+  while(!Console) {
+    ; // Wait for Console port to connect
   }
   Console.println("You're connected to the Console!!!!");
   configureSettings();
 }
 
-void loop()
-{
-  // establish variables for duration of the ping, 
-  // and the distance result in inches and centimeters:
-  float duration, inches, cm;
+//
+// Main loop
+//
+void loop() {
+  float inches = readDistance();
+  
+  Console.println(inches);
+  
+  // Determine if we need to fetch new settings from API
+  secondsSinceLastRefresh = (millis() - lastSettingsRefresh) / 1000;
+  if(secondsSinceLastRefresh >= settingsRefreshTimeoutInSec) {
+    configureSettings();
+  }
 
+  delay(loopTimeout);
+}
+
+//
+// Helper functions
+//
+float readDistance() {
   // The PING))) is triggered by a HIGH pulse of 2 or more microseconds.
-  // Give a short LOW pulse beforehand to ensure a clean HIGH pulse:
+  // Give a short LOW pulse beforehand to ensure a clean HIGH pulse.
   pinMode(pingPin, OUTPUT);
   digitalWrite(pingPin, LOW);
   delayMicroseconds(2);
@@ -52,25 +74,11 @@ void loop()
   // pulse whose duration is the time (in microseconds) from the sending
   // of the ping to the reception of its echo off of an object.
   pinMode(pingPin, INPUT);
-  
-  duration = pulseIn(pingPin, HIGH);
-  inches = microsecondsToInches(duration);
-  
-  Console.println(inches);
-  
-  timeSinceLastRefresh = millis() - lastSettingsRefresh;
-  
-  if(timeSinceLastRefresh >= settingsRefreshTimeout)
-  {
-    configureSettings();
-    lastSettingsRefresh = millis();
-  }
 
-  delay(loopTimeout);
+  return microsecondsToInches(pulseIn(pingPin, HIGH));
 }
 
-void configureSettings()
-{
+void configureSettings() {
   Console.println("Configuring settings...");
   client.get("http://10.0.1.23:3000/api/devices/1/settings");
   
@@ -78,74 +86,73 @@ void configureSettings()
   String responseBody = "";
   String key = "";
   String value = "";
+
   while (client.available()) {
     char c = client.read();
     responseBody += c;
-    
-    if(populatingKey == 1)
-    {
-      if(c == ':')
-      {
+
+    if(populatingKey == 1) {
+      if(c == ':') {
         populatingKey = 0;
-      } else
-      {
+      } else {
         key += c;
       }
-    } else // Populating value
-    {
-      if(c == ':')
-      {
+    } else { // Populating value
+      if(c == ':') {
         populatingKey = 1;
         assignSetting(key, value);
         key = "";
         value = "";
-      } else
-      {
+      } else {
         value += c;
       }
     }
   }
-  
-  assignSetting(key, value);
-  debugSettings();
 
-  Console.println(sizeof(responseBody));
+  assignSetting(key, value);
+  lastSettingsRefresh = millis();
+  debugSettings();
 }
 
-void debugSettings()
-{
+void debugSettings() {
   Console.println("***************************");  
   Console.println("SETTINGS:");
-  Console.print("notificationTimeout:");
-  Console.print(notificationTimeout);
-  Console.println("loopTimeout:");
-  Console.print(loopTimeout);
+  Console.print("notificationTimeout: ");
+  Console.println(notificationTimeout);
+  Console.print("loopTimeout: ");
+  Console.println(loopTimeout);
+  Console.print("settingsRefreshTimeoutInSec: ");
+  Console.println(settingsRefreshTimeoutInSec);
+  Console.print("withinRangeTimeoutInSec: ");
+  Console.println(withinRangeTimeoutInSec);
+  Console.print("rangeThreshold: ");
+  Console.println(rangeThreshold);
   Console.println("\n***************************"); 
 }
 
-void assignSetting(String key, String value)
-{
+void assignSetting(String key, String value) {
   Console.println("ASSIGNING SETTING!");
   Console.println("KEY: " + key);
   Console.println("VALUE: " + value);
-  
-  if(key == "notification_timeout")
-  {
-    Console.println("REMINDER TIMEOUT GETTING SET!!!");
+
+  if(key == "notification_timeout") {
     notificationTimeout = value.toInt();
   }
-  if(key == "loop_timeout")
-  {
-    Console.println("LOOP TIMEOUT GETTING SET!!!");
+  if(key == "loop_timeout") {
     loopTimeout = value.toInt();
   }
-  // TODO: CONFIGURE REST OF SETTINGS HERE!!!
-  // TODO: CONFIGURE REST OF SETTINGS HERE!!!
-  // TODO: CONFIGURE REST OF SETTINGS HERE!!!
+  if(key == "settings_refresh_timeout") {
+    settingsRefreshTimeoutInSec = value.toInt();
+  }
+  if(key == "within_range_timeout_in_sec") {
+    withinRangeTimeoutInSec = value.toInt();
+  }
+  if(key == "range_threshold") {
+    rangeThreshold = value.toInt();
+  }
 }
 
-float microsecondsToInches(float microseconds)
-{
+float microsecondsToInches(float microseconds) {
   // According to Parallax's datasheet for the PING))), there are
   // 73.746 microseconds per inch (i.e. sound travels at 1130 feet per
   // second).  This gives the distance travelled by the ping, outbound
