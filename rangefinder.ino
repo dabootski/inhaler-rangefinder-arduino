@@ -7,6 +7,8 @@
 //
 const int pingPin = 7;
 HttpClient client;
+String apiHost = "http://afternoon-falls-6612.herokuapp.com/api/devices/2";
+//String apiHost = "http://10.0.1.23:3000/api/devices/2";
 
 //
 // Settings
@@ -24,6 +26,7 @@ unsigned long lastSettingsRefresh = millis();
 unsigned long secondsSinceLastRefresh;
 float outOfRangeSince;
 float withinRangeSince;
+float secondsWithinRange;
 
 //
 // Setup
@@ -33,9 +36,9 @@ void setup() {
   Bridge.begin();
   Console.begin();
   
-  while(!Console) {
-    ; // Wait for Console port to connect
-  }
+//  while(!Console) {
+//    ; // Wait for Console port to connect
+//  }
   Console.println("You're connected to the Console!!!!");
   configureSettings();
 }
@@ -45,14 +48,42 @@ void setup() {
 //
 void loop() {
   float inches = readDistance();
-  
+
   Console.println(inches);
-  
+
+  // Object is within range for first time
+  if (!withinRangeSince && (inches <= rangeThreshold)) {
+    Console.println("Object is now within range: ");
+    Console.println(millis());
+    withinRangeSince = millis();
+    syncEvent("In Range", "Object is within range");
+  }
+
+  // Object is now out of range
+  if (withinRangeSince && (inches > rangeThreshold)) {
+    Console.println("Object is out of range");
+    withinRangeSince = 0; // TODO: Figure out how to null out variable...
+    syncEvent("Out of range", "Object is out of range");
+  }
+
   // Determine if we need to fetch new settings from API
   secondsSinceLastRefresh = (millis() - lastSettingsRefresh) / 1000;
   if(secondsSinceLastRefresh >= settingsRefreshTimeoutInSec) {
     configureSettings();
   }
+
+// TODO: Move this to the API/server side.  
+// Determine how long the object has been within range and if notifications should be sent
+//  if (withinRangeSince) {
+//    secondsWithinRange = (millis() - withinRangeSince) / 1000.0;
+//
+//    Console.println("SECONDS WITHIN RANGE: ");
+//    Console.println(secondsWithinRange);
+//
+//    if (secondsWithinRange > withinRangeTimeoutInSec) {
+//      syncEvent();
+//    }
+//  }
 
   delay(loopTimeout);
 }
@@ -80,7 +111,7 @@ float readDistance() {
 
 void configureSettings() {
   Console.println("Configuring settings...");
-  client.get("http://10.0.1.23:3000/api/devices/1/settings");
+  client.get(apiHost + "/settings");
   
   int populatingKey = 1;
   String responseBody = "";
@@ -111,6 +142,7 @@ void configureSettings() {
 
   assignSetting(key, value);
   lastSettingsRefresh = millis();
+  syncEvent("Settings synced", "Settings were synced!");
   debugSettings();
 }
 
@@ -159,5 +191,13 @@ float microsecondsToInches(float microseconds) {
   // and return, so we divide by 2 to get the distance of the obstacle.
   // See: http://www.parallax.com/dl/docs/prod/acc/28015-PING-v1.3.pdf
   return microseconds / 74 / 2;
+}
+
+void syncEvent(String eventTitle, String eventDescription) {
+  eventTitle.replace(" ", "%20");
+  eventDescription.replace(" ", "%20");
+  String url = apiHost + "/create_event?title=" + eventTitle + "&description=" + eventDescription;
+  Console.println("EVENT URL: " + url);
+  client.get(url);
 }
 
